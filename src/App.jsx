@@ -9,7 +9,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Breadcrumbs from './components/Breadcrumbs';
 import NotFound from './components/NotFound';
 import SEOHead from './components/SEOHead';
-import { pageMetadata } from './utils/seo';
 
 function App() {
   const [activeView, setActiveView] = useState(() => {
@@ -177,7 +176,8 @@ function App() {
                   Decentralized provenance protocol connecting Indian rural beekeepers with conscious consumers through cryptographic proof of origin and IoT hive telemetry.
                 </p>
                 <div className="mt-4 flex items-center gap-2 text-xs text-amber-500 font-semibold">
-                  <span>🐝 Protected by Honey Chain SHA-256</span>
+                  <Hexagon className="w-3.5 h-3.5" />
+                  <span>Protected by Honey Chain SHA-256</span>
                 </div>
               </div>
 
@@ -238,11 +238,23 @@ function App() {
 
             <div className="border-t border-stone-800 mt-8 pt-8 flex flex-col md:flex-row items-center justify-between text-xs text-stone-500 gap-4">
               <p>© 2026 Honey Chain — Khadi and Village Industries Commission (KVIC) Partner Prototype</p>
-              <p className="flex items-center gap-2">
-                <span>Built for Smart India Hackathon 2026</span>
-                <span>•</span>
-                <span className="text-amber-500 font-medium">Domain: honeychain.in</span>
-              </p>
+              <div className="flex flex-col md:flex-row items-center gap-x-4 gap-y-2">
+                <p className="flex items-center gap-2">
+                  <span>Built for Smart India Hackathon 2026</span>
+                  <span className="hidden md:inline">•</span>
+                  <span className="text-amber-500 font-medium">Domain: honeychain.in</span>
+                </p>
+                <a 
+                  href="https://instagram.com/hemanth._.rao" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="text-amber-400 hover:text-amber-300 font-semibold transition flex items-center gap-1"
+                >
+                  Instagram: @hemanth._.rao
+                </a>
+                <span className="hidden md:inline">•</span>
+                <p className="text-amber-400 font-bold">This website is Built/Created by HEMANTH RAO</p>
+              </div>
             </div>
           </div>
         </footer>

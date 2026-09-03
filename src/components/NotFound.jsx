@@ -1,11 +1,10 @@
-import { Home, Search, ArrowLeft, Hexagon } from 'lucide-react';
+import { Home, Search, ArrowLeft, Hexagon, ShieldCheck } from 'lucide-react';
 import HoneycombLogo from './HoneycombLogo';
 
 export default function NotFound({ onNavigate }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-50 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-amber-50 flex items-center justify-center p-6">
       <div className="max-w-2xl w-full text-center">
-        {/* Honeycomb Pattern Background */}
         <div className="relative mb-8">
           <div className="flex items-center justify-center gap-4 mb-6">
             <Hexagon className="w-16 h-16 text-amber-300 opacity-50" />
@@ -13,27 +12,24 @@ export default function NotFound({ onNavigate }) {
             <Hexagon className="w-16 h-16 text-amber-300 opacity-50" />
           </div>
 
-          {/* 404 Number */}
           <h1 className="text-9xl font-black text-amber-600 mb-4 tracking-tight">
             404
           </h1>
 
-          <div className="inline-block px-6 py-2 bg-amber-100 rounded-full mb-6">
-            <p className="text-amber-800 font-semibold">Oops! Lost in the Hive</p>
+          <div className="inline-flex items-center gap-2 px-5 py-2 bg-amber-100 border border-amber-200 rounded-full mb-6">
+            <ShieldCheck className="w-4 h-4 text-amber-700" />
+            <p className="text-amber-900 font-semibold">Honey Chain route not found</p>
           </div>
         </div>
 
-        {/* Message */}
-        <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
+        <div className="bg-white rounded-lg shadow-xl p-8 mb-8 border border-amber-100">
           <h2 className="text-2xl font-bold text-gray-900 mb-3">
-            This Honeycomb Doesn't Exist
+            This Honey Chain page is unavailable
           </h2>
           <p className="text-gray-600 mb-6">
-            The page you're looking for might have been moved, deleted, or never existed.
-            Let's get you back to tracking authentic honey!
+            Use one of the verified platform routes below to continue the honey traceability workflow.
           </p>
 
-          {/* Quick Actions */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
               onClick={() => onNavigate('beekeeper')}
@@ -41,8 +37,8 @@ export default function NotFound({ onNavigate }) {
             >
               <Home className="w-8 h-8 text-amber-600" />
               <div>
-                <p className="font-semibold text-gray-900">Beekeeper</p>
-                <p className="text-xs text-gray-600">Register batches</p>
+                <p className="font-semibold text-gray-900">Beekeeper Portal</p>
+                <p className="text-xs text-gray-600">Register honey batches</p>
               </div>
             </button>
 
@@ -52,8 +48,8 @@ export default function NotFound({ onNavigate }) {
             >
               <Search className="w-8 h-8 text-green-600" />
               <div>
-                <p className="font-semibold text-gray-900">Consumer</p>
-                <p className="text-xs text-gray-600">Verify honey</p>
+                <p className="font-semibold text-gray-900">Consumer Verification</p>
+                <p className="text-xs text-gray-600">Check batch authenticity</p>
               </div>
             </button>
 
@@ -63,14 +59,13 @@ export default function NotFound({ onNavigate }) {
             >
               <Hexagon className="w-8 h-8 text-blue-600" />
               <div>
-                <p className="font-semibold text-gray-900">Admin</p>
-                <p className="text-xs text-gray-600">KVIC Dashboard</p>
+                <p className="font-semibold text-gray-900">Admin / KVIC</p>
+                <p className="text-xs text-gray-600">Monitor clusters</p>
               </div>
             </button>
           </div>
         </div>
 
-        {/* Back Button */}
         <button
           onClick={() => window.history.back()}
           className="inline-flex items-center gap-2 text-amber-700 hover:text-amber-800 font-semibold transition"
@@ -78,11 +73,6 @@ export default function NotFound({ onNavigate }) {
           <ArrowLeft className="w-5 h-5" />
           Go Back
         </button>
-
-        {/* Bee Animation */}
-        <div className="mt-8 text-4xl animate-bounce">
-          🐝
-        </div>
       </div>
     </div>
   );

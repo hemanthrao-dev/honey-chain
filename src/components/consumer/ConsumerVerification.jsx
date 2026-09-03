@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Search, CheckCircle, XCircle, AlertTriangle, Package, MapPin, Calendar, User, ArrowRight, Sparkles, ShieldCheck } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Search, CheckCircle, XCircle, AlertTriangle, Package, MapPin, Calendar, User, Sparkles, ShieldCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { honeyChain } from '../../utils/blockchain';
 import { sanitizeString } from '../../utils/validation';
@@ -13,14 +13,7 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
   const [tamperMode, setTamperMode] = useState(false);
   const [tamperData, setTamperData] = useState({ quantity: '', location: '' });
 
-  useEffect(() => {
-    if (initialBatchId) {
-      setBatchId(initialBatchId);
-      verifyBatch(initialBatchId);
-    }
-  }, [initialBatchId]);
-
-  const verifyBatch = (idToVerify) => {
+  const verifyBatch = useCallback((idToVerify) => {
     const sanitizedBatchId = sanitizeString((idToVerify || batchId).trim());
 
     if (!sanitizedBatchId) {
@@ -57,7 +50,14 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
       toast.error('Error verifying batch');
       console.error('Verification error:', error);
     }
-  };
+  }, [batchId]);
+
+  useEffect(() => {
+    if (initialBatchId) {
+      setBatchId(initialBatchId);
+      verifyBatch(initialBatchId);
+    }
+  }, [initialBatchId, verifyBatch]);
 
   const handleVerify = () => verifyBatch(batchId);
 
@@ -145,7 +145,7 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
                 onChange={(e) => setBatchId(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono text-gray-900"
-                placeholder="e.g. HB-DEMO-001-KVIC"
+                aria-label="Honey batch identification code"
                 maxLength="50"
               />
             </div>
@@ -350,7 +350,7 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
                         value={tamperData.quantity}
                         onChange={(e) => setTamperData({ ...tamperData, quantity: e.target.value })}
                         className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        placeholder={`Original: ${batch.data.quantity}`}
+                        aria-label="Falsified quantity"
                       />
                     </div>
                     <div>
@@ -360,7 +360,7 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
                         value={tamperData.location}
                         onChange={(e) => setTamperData({ ...tamperData, location: e.target.value })}
                         className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        placeholder={`Original: ${batch.data.location}`}
+                        aria-label="Falsified location"
                       />
                     </div>
                   </div>

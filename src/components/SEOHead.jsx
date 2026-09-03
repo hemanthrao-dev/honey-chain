@@ -18,6 +18,7 @@ export default function SEOHead({ pageKey }) {
       'og:image': meta.ogImage,
       'og:type': 'website',
       'og:site_name': 'Honey Chain',
+      author: 'HEMANTH RAO',
       'twitter:card': meta.twitterCard,
       'twitter:title': meta.twitterTitle,
       'twitter:description': meta.twitterDescription,

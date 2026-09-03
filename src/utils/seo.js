@@ -3,8 +3,8 @@
 export const seoConfig = {
   siteName: 'Honey Chain',
   siteUrl: 'https://honeychain.in',
-  defaultTitle: 'Honey Chain — Blockchain Honey Traceability for KVIC Beekeepers',
-  defaultDescription: 'Verify authentic KVIC honey with blockchain traceability, QR code authentication, and AI-powered smart beekeeping. Empowering rural beekeepers across India.',
+  defaultTitle: 'Honey Chain - KVIC Honey Traceability Platform',
+  defaultDescription: 'Honey Chain helps KVIC beekeeper clusters register honey batches, verify jar authenticity with QR codes, and monitor traceability through a SHA-256 ledger.',
   twitterHandle: '@HoneyChainIndia',
   ogImage: '/og-image.png',
 };
@@ -12,7 +12,7 @@ export const seoConfig = {
 export const pageMetadata = {
   beekeeper: {
     title: 'Beekeeper Dashboard — Register Honey Batches & Monitor Hive Health | Honey Chain',
-    description: 'Register honey batches on blockchain, monitor real-time IoT hive sensors, track temperature, humidity, weight. Get AI alerts for disease detection and yield predictions.',
+    description: 'Register KVIC honey batches, select hive units, record harvest details, and monitor honey bee hive telemetry with yield and health signals.',
     keywords: 'beekeeper dashboard, honey batch registration, hive monitoring, IoT sensors, beekeeping AI, yield prediction, KVIC beekeepers',
     ogTitle: 'Beekeeper Dashboard — Smart Beekeeping with IoT & Blockchain',
     h1: 'Smart Beekeeper Dashboard',
@@ -20,7 +20,7 @@ export const pageMetadata = {
   },
   consumer: {
     title: 'Verify Honey Authenticity — QR Code Batch Verification | Honey Chain',
-    description: 'Scan QR code or enter batch ID to verify authentic KVIC honey. View complete blockchain chain of custody from hive to consumer. Detect tampering instantly.',
+    description: 'Verify a Honey Chain batch ID, review apiary origin, inspect QR proof, and detect tampered honey records through ledger validation.',
     keywords: 'verify honey authenticity, QR code verification, honey traceability, blockchain verification, KVIC honey, genuine honey check',
     ogTitle: 'Verify Honey Authenticity — Blockchain-Powered Consumer Trust',
     h1: 'Verify Your Honey\'s Authenticity',
@@ -28,15 +28,15 @@ export const pageMetadata = {
   },
   admin: {
     title: 'KVIC Admin Dashboard — Honey Production Analytics & Blockchain Monitoring | Honey Chain',
-    description: 'Monitor KVIC honey mission network with real-time analytics, regional distribution charts, beekeeper cluster management, and blockchain health monitoring.',
+    description: 'Manage KVIC beekeeper apiary clusters, add dated producer records, inspect production analytics, and monitor Honey Chain ledger health.',
     keywords: 'KVIC admin dashboard, honey production analytics, blockchain monitoring, beekeeper clusters, regional honey statistics, smart India hackathon',
     ogTitle: 'KVIC Admin Dashboard — National Honey Traceability Network',
     h1: 'KVIC Honey Mission Control Center',
     breadcrumb: 'Admin Dashboard',
   },
   notFound: {
-    title: '404 — Page Not Found | Honey Chain',
-    description: 'The page you\'re looking for doesn\'t exist. Return to Honey Chain dashboard to verify honey authenticity or register batches.',
+    title: '404 Page Not Found | Honey Chain',
+    description: 'Honey Chain could not find this route. Use the beekeeper, consumer, or KVIC admin links to continue the honey traceability demo.',
     keywords: '404 error, page not found',
     ogTitle: 'Page Not Found — Honey Chain',
     h1: 'Oops! Lost in the Hive',
@@ -66,7 +66,6 @@ export function generateMetaTags(pageKey) {
   };
 }
 
-// Structured data for Organization
 export const organizationSchema = {
   '@context': 'https://schema.org',
   '@type': 'Organization',
@@ -77,9 +76,15 @@ export const organizationSchema = {
   foundingDate: '2026',
   areaServed: 'India',
   slogan: 'Blockchain-Powered Honey Traceability for Rural Beekeepers',
+  creator: {
+    '@type': 'Person',
+    name: 'HEMANTH RAO',
+    url: 'https://instagram.com/hemanth._.rao',
+  },
   sameAs: [
     'https://twitter.com/HoneyChainIndia',
     'https://github.com/honeychain',
+    'https://instagram.com/hemanth._.rao',
   ],
   contactPoint: {
     '@type': 'ContactPoint',
@@ -110,6 +115,10 @@ export const webApplicationSchema = {
     'Yield prediction',
     'Tamper-proof batch tracking',
   ],
+  creator: {
+    '@type': 'Person',
+    name: 'HEMANTH RAO',
+  },
   screenshot: `${seoConfig.siteUrl}/screenshot.png`,
 };
 

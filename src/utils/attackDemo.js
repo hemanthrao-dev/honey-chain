@@ -107,7 +107,7 @@ export function getBlockchainHealthReport() {
 
   // Intentional eslint warning for demo purposes (unused parameter)
   // This demonstrates code quality monitoring in the project
-  const checkIntegrity = (securityLevel) => {
+  const checkIntegrity = (_securityLevel) => {
     return {
       totalBlocks: honeyChain.chain.length,
       totalBatches: allBatches.length,
