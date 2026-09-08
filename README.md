@@ -1,4 +1,4 @@
-﻿# 🍯 Honey Chain — Security-First Provenance & Traceability Ledger
+# 🍯 Honey Chain — Security-First Provenance & Traceability Ledger
 
 > **KVIC Honey Mission × Smart India Hackathon (SIH 2026)**  
 > **Problem ID**: SIH26021 | **Ministry**: Ministry of Micro, Small and Medium Enterprises (MSME)  
@@ -12,8 +12,9 @@
 
 ### Key Highlights
 - 🔐 **Security-First Architecture**: JWT authentication in `httpOnly` + `Secure` + `SameSite` cookies, bcrypt password hashing (12 rounds), role-based access control (RBAC), and express rate-limiting.
-- ⛓️ **Server-Side SHA-256 Ledger**: Immutable hash chain persisted in SQLite (`better-sqlite3` in WAL mode) with automated cryptographic tampering detection.
+- ⛓️ **Server-Side SHA-256 Ledger**: Immutable hash chain persisted in SQLite (`better-sqlite3` in WAL mode) with automated cryptographic tampering detection and live restoration.
 - 🧪 **Cryptographic Lab Verification**: Single-use, batch-specific verification codes generated via `crypto.randomBytes`, hashed before storage, and authenticated with timing-safe comparison.
+- 📊 **IoT Hive Telemetry & Analytics**: Real-time tracking of hive temperature, humidity, weight, and acoustical activity with interactive charts.
 - 📱 **Consumer QR Traceability**: Instant QR code scan for end-to-end batch provenance, botanical flora verification, and blockchain chain-integrity checks.
 
 ---
@@ -22,9 +23,9 @@
 
 ```mermaid
 flowchart TD
-    subgraph Client["Frontend Layer (React 19 + Vite 8)"]
-        A1[Beekeeper Portal]
-        A2[Consumer QR Scanner]
+    subgraph Client["Frontend Layer (React 19 + Vite 8 + Tailwind CSS 4)"]
+        A1[Beekeeper Portal & IoT Telemetry]
+        A2[Consumer QR Scanner & Provenance]
         A3[KVIC Admin Dashboard]
     end
 
@@ -105,10 +106,11 @@ flowchart TD
 
 | Layer | Technologies / Packages | Purpose & Highlights |
 | :--- | :--- | :--- |
-| **Programming Languages** | **JavaScript (ES2023 / Node ESM)**, **SQL**, **HTML5**, **CSS3** | Native ES modules, modern syntax across frontend & backend |
-| **Frontend Framework & UI** | **React 19.2**, **Tailwind CSS 4.0**, **Lucide React**, **Recharts** | Reactive state, responsive glassmorphism UI, IoT charts |
-| **Runtime & Build Tools** | **Node.js 18+**, **Vite 8.2**, **esbuild**, **oxlint** | Lightning-fast HMR, sub-second production builds, fast linting |
-| **Backend Framework** | **Node.js + Express (v4.21 / v5)** | Production REST API with modular controllers, routes, & middleware |
+| **Programming Languages** | **JavaScript (ES2023 / ESM)**, **SQL**, **HTML5**, **CSS3** | Native ES modules across frontend & backend |
+| **Frontend Framework & UI** | **React 19.2**, **Tailwind CSS 4.0**, **Lucide React**, **Recharts** | Reactive state, responsive glassmorphism UI, IoT telemetry charts |
+| **QR Code Processing** | **html5-qrcode**, **qrcode.react**, **qrcode** | Camera-based QR scanning & dynamic SVG/PNG QR rendering |
+| **Runtime & Build Tools** | **Node.js 18+**, **Vite 8.2**, **esbuild**, **oxlint** | Lightning-fast HMR, sub-second builds, fast zero-config linting |
+| **Backend Framework** | **Node.js + Express (v4.21 / v5)** | REST API with modular controllers, routes, & middleware |
 | **Database & Persistence** | **better-sqlite3 (v13.0)** | Embedded zero-latency SQLite engine with Write-Ahead Logging (WAL) |
 | **Blockchain / Ledger** | **Node.js `crypto` (SHA-256)** | Server-side hash linking, genesis block anchoring, tamper detection |
 | **Authentication & Tokens** | **jsonwebtoken (v9.0)**, **cookie-parser** | Stateless JWT tokens stored in secure `httpOnly` cookies |
@@ -169,6 +171,10 @@ flowchart TD
 
 ## 💻 Installation & Quick Start
 
+### Prerequisites
+- **Node.js**: v18.0.0 or higher
+- **npm**: v9.0.0 or higher
+
 ### 1. Clone Repository & Install Dependencies
 ```bash
 git clone https://github.com/hemanthrao-dev/honey-chain.git
@@ -177,25 +183,56 @@ npm install
 ```
 
 ### 2. Environment Setup
-Create a `.env` file from `.env.example`:
+Create a `.env` file in the root directory (or use `.env.example`):
 ```bash
 cp .env.example .env
 ```
 
-### 3. Launch Backend Server & Frontend Application
+Default environment variables:
+```env
+PORT=5000
+NODE_ENV=development
+JWT_SECRET=honey_chain_super_secret_jwt_key_2026_kvic
+JWT_EXPIRES_IN=24h
+BCRYPT_ROUNDS=12
+FRONTEND_ORIGIN=http://localhost:5173,http://localhost:5174,http://localhost:3000
+DB_PATH=backend/data/honey_chain.db
+```
+
+### 3. Development Workflow
 ```bash
-# Terminal 1: Start Backend API (Port 5000)
+# Terminal 1: Launch Backend API Server (Port 5000)
 npm run server
 
-# Terminal 2: Start Frontend Development Server (Port 5173)
+# Terminal 2: Launch Frontend Development Server (Port 5173)
 npm run dev
 ```
 
-### 4. Run Automated Backend Security Test Suite
+### 4. Run Automated Tests & Code Quality Checks
 ```bash
+# Execute 14-point automated security & cryptographic ledger test suite
 node backend/test-backend.js
+
+# Code quality check using Oxlint
+npm run lint
+
+# Production build verification
+npm run build
 ```
-*(Runs all 14 automated security, cryptographic ledger, and workflow tests).*
+
+---
+
+## 📜 Available NPM Scripts
+
+| Script | Command | Purpose |
+| :--- | :--- | :--- |
+| `npm run dev` | `vite` | Starts Vite development server for the React frontend |
+| `npm run server` | `node backend/src/server.js` | Starts Express backend server |
+| `npm run server:dev` | `node --watch backend/src/server.js` | Starts Express backend server with auto-reload on code changes |
+| `npm run build` | `vite build` | Compiles frontend production bundle into `dist/` |
+| `npm run lint` | `oxlint` | Runs fast code linting across all source files |
+| `npm run preview` | `vite preview` | Previews production build locally |
+| `npm run deploy` | `gh-pages -d dist` | Deploys static frontend build to GitHub Pages |
 
 ---
 
@@ -227,23 +264,41 @@ honey-chain/
 │   │   │   └── blockchain.js        # Ledger appending & tamper detection
 │   │   └── server.js                # Express app, Helmet, CORS, endpoints
 │   ├── package.json
-│   ├── test-backend.js              # 14-point automated test suite
-│   └── .env                         # Server environment configuration
-├── src/
-│   ├── components/
-│   │   ├── admin/AdminDashboard.jsx # Admin management portal
-│   │   ├── beekeeper/BeekeeperDashboard.jsx # Beekeeper portal & IoT
-│   │   ├── consumer/ConsumerVerification.jsx # QR code verification
-│   │   └── LoginPage.jsx            # Portal authentication
-│   ├── utils/
-│   │   ├── api.js                   # Unified frontend API client
-│   │   ├── blockchain.js            # Client fallback & blockchain utils
-│   │   └── beekeepers.js            # Helper normalization utilities
-│   ├── App.jsx                      # Main router & role switcher
-│   └── main.jsx                     # Vite React entrypoint
-├── index.html                       # HTML5 template
-├── vite.config.js                   # Vite configuration
+│   └── test-backend.js              # 14-point automated test suite
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── admin/
+│   │   │   │   └── AdminDashboard.jsx # KVIC Admin management portal
+│   │   │   ├── beekeeper/
+│   │   │   │   └── BeekeeperDashboard.jsx # Beekeeper portal & batch entry
+│   │   │   ├── consumer/
+│   │   │   │   └── ConsumerVerification.jsx # QR code scanner & provenance
+│   │   │   ├── Breadcrumbs.jsx      # Navigation breadcrumbs
+│   │   │   ├── ErrorBoundary.jsx    # React error boundary fallback
+│   │   │   ├── HoneycombLogo.jsx    # SVG brand logo component
+│   │   │   ├── LoginPage.jsx        # Unified authentication screen
+│   │   │   ├── NotFound.jsx         # 404 fallback page
+│   │   │   ├── SensorChart.jsx      # Recharts IoT telemetry visualization
+│   │   │   └── SEOHead.jsx          # Dynamic metadata header
+│   │   ├── utils/
+│   │   │   ├── api.js               # Centralized frontend API client
+│   │   │   ├── attackDemo.js        # Tamper demonstration helpers
+│   │   │   ├── beekeepers.js        # Beekeeper normalization helpers
+│   │   │   ├── blockchain.js        # Cryptographic verification helpers
+│   │   │   ├── labCertificates.js   # Certificate verification helpers
+│   │   │   ├── mockData.js          # IoT sensor & demo dataset
+│   │   │   ├── seo.js               # Metadata configuration
+│   │   │   ├── typeChecks.js        # Runtime parameter sanitization
+│   │   │   └── validation.js        # Form validation helpers
+│   │   ├── App.jsx                  # Main application router & role switcher
+│   │   ├── index.css                # Tailwind CSS v4 directives
+│   │   └── main.jsx                 # Vite React entry point
+│   └── index.html                   # HTML5 template
+├── .env.example                     # Environment variables template
+├── check-imports.mjs                # Import path verification tool
 ├── package.json                     # Root dependencies & scripts
+├── vite.config.js                   # Vite bundler configuration
 └── README.md                        # Documentation
 ```
 
@@ -251,7 +306,7 @@ honey-chain/
 
 ## 👥 Authors & Acknowledgments
 
-- **Project Lead**: Hemanth Rao
+- **Project Lead**: Hemanth Rao (`hemanthrao-dev`)
 - **Team**: ACE (Smart India Hackathon 2026)
 - **Institutional Partner Context**: Khadi and Village Industries Commission (KVIC), Ministry of MSME, Govt. of India.
 - **Contact**: `hemanthrao1947@gmail.com` | `+91 9108664824`
