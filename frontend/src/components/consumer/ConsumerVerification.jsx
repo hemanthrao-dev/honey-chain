@@ -1,19 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Search, CheckCircle, XCircle, AlertTriangle, Package, MapPin, Calendar, User, Sparkles, ShieldCheck } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Search, CheckCircle, XCircle, Package, MapPin, Calendar, User, Sparkles, ShieldCheck, Camera, X } from 'lucide-react';
 import { honeyChain } from '../../utils/blockchain';
 import { sanitizeString } from '../../utils/validation';
+import { isLabCertified } from '../../utils/labCertificates';
+import { api } from '../../utils/api';
 import toast from 'react-hot-toast';
 
-export default function ConsumerVerification({ initialBatchId, onNavigate }) {
+export default function ConsumerVerification({ initialBatchId }) {
   const [batchId, setBatchId] = useState(initialBatchId || '');
   const [batch, setBatch] = useState(null);
   const [chainValid, setChainValid] = useState(null);
-  const [showQR, setShowQR] = useState(false);
-  const [tamperMode, setTamperMode] = useState(false);
-  const [tamperData, setTamperData] = useState({ quantity: '', location: '' });
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const scannerRef = useRef(null);
+  const scannerContainerRef = useRef(null);
 
-  const verifyBatch = useCallback((idToVerify) => {
+  const verifyBatch = useCallback(async (idToVerify) => {
     const sanitizedBatchId = sanitizeString((idToVerify || batchId).trim());
 
     if (!sanitizedBatchId) {
@@ -24,6 +25,43 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
     if (sanitizedBatchId.length > 50) {
       toast.error('Invalid batch ID format');
       return;
+    }
+
+    // Try server-side public verification first
+    try {
+      const serverRes = await api.batches.verifyPublic(sanitizedBatchId);
+      if (serverRes?.data) {
+        const d = serverRes.data;
+        const mappedBlock = {
+          index: d.blockchain.blockIndex,
+          timestamp: d.blockchain.timestamp,
+          hash: d.blockchain.hash,
+          previousHash: d.blockchain.previousHash,
+          data: {
+            batchId: d.batchId,
+            beekeeperId: d.beekeeperId,
+            beekeeper: d.beekeeper,
+            hiveId: d.hiveId,
+            quantity: d.quantity,
+            floralSource: d.floralSource,
+            location: d.location,
+            harvestDate: d.harvestDate,
+            notes: d.notes,
+            status: d.status,
+            labTested: d.labTested,
+          },
+        };
+        setBatch(mappedBlock);
+        setChainValid(d.ledgerIntegrity);
+        if (d.ledgerIntegrity.chainValid) {
+          toast.success('Batch verified — authentic KVIC Honey!');
+        } else {
+          toast.error('Warning: Tampering detected in blockchain ledger!');
+        }
+        return;
+      }
+    } catch {
+      // Fallback to local chain
     }
 
     const block = honeyChain.getBatchById(sanitizedBatchId);
@@ -39,7 +77,6 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
       const validation = honeyChain.isChainValid();
       setBatch(block);
       setChainValid(validation);
-      setShowQR(true);
 
       if (validation.valid) {
         toast.success('Batch verified — authentic KVIC Honey!');
@@ -52,50 +89,69 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
     }
   }, [batchId]);
 
-  useEffect(() => {
-    if (initialBatchId) {
-      setBatchId(initialBatchId);
-      verifyBatch(initialBatchId);
-    }
-  }, [initialBatchId, verifyBatch]);
 
   const handleVerify = () => verifyBatch(batchId);
 
-  const handleTamper = () => {
-    if (!batch) return;
+  const startScanner = async () => {
+    setScannerOpen(true);
+    try {
+      const { Html5Qrcode } = await import('html5-qrcode');
+      await new Promise(r => setTimeout(r, 100));
 
-    const updates = {};
-    if (tamperData.quantity) updates.quantity = parseFloat(tamperData.quantity);
-    if (tamperData.location) updates.location = sanitizeString(tamperData.location);
+      const scanner = new Html5Qrcode('qr-reader');
+      scannerRef.current = scanner;
 
-    honeyChain.tamperWithBlock(batch.index, updates);
+      await scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+        },
+        (decodedText) => {
+          let extractedBatchId = decodedText;
 
-    toast.error('Batch data tampered with! Verify again to see cryptographic failure.');
+          try {
+            const url = new URL(decodedText);
+            const params = new URLSearchParams(url.search);
+            const batchParam = params.get('batch');
+            if (batchParam) {
+              extractedBatchId = batchParam;
+            }
+          } catch {
+            // Not a URL, use as-is
+          }
 
-    setTamperMode(false);
-    setTamperData({ quantity: '', location: '' });
-    setBatch(null);
-    setChainValid(null);
-  };
-
-  const handleRestore = () => {
-    honeyChain.restoreChain();
-    toast.success('Blockchain chain integrity restored!');
-    setBatch(null);
-    setChainValid(null);
-    setBatchId('');
-  };
-
-  const getSampleBatchId = () => {
-    const batches = honeyChain.getAllBatches();
-    if (batches.length > 0) {
-      const sampleId = batches[batches.length - 1].data.batchId;
-      setBatchId(sampleId);
-      toast.success('Sample batch ID loaded. Click "Verify" to validate.');
-    } else {
-      toast.error('No batches registered yet. Use the Beekeeper dashboard to register one.');
+          setBatchId(extractedBatchId);
+          stopScanner();
+          toast.success('QR code scanned! Verifying...');
+          setTimeout(() => verifyBatch(extractedBatchId), 300);
+        },
+        () => {}
+      );
+    } catch (err) {
+      console.error('QR scanner error:', err);
+      toast.error('Camera access denied or not available. Please enter batch ID manually.');
+      setScannerOpen(false);
     }
   };
+
+  const stopScanner = () => {
+    if (scannerRef.current) {
+      scannerRef.current.stop().catch(() => {});
+      scannerRef.current.clear().catch(() => {});
+      scannerRef.current = null;
+    }
+    setScannerOpen(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {});
+        scannerRef.current.clear().catch(() => {});
+      }
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-amber-50/30 p-6">
@@ -114,21 +170,26 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
           </p>
         </div>
 
-        {/* Quick Nav Shortcuts */}
-        {onNavigate && (
-          <div className="mb-6 flex justify-center gap-3 text-sm">
-            <button
-              onClick={() => onNavigate('beekeeper')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-gray-700 rounded-lg hover:bg-amber-50 hover:text-amber-800 transition font-medium border border-amber-200 shadow-sm"
-            >
-              ← Beekeeper Portal
-            </button>
-            <button
-              onClick={() => onNavigate('admin')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-gray-700 rounded-lg hover:bg-amber-50 hover:text-amber-800 transition font-medium border border-amber-200 shadow-sm"
-            >
-              KVIC Admin Overview →
-            </button>
+        {/* QR Scanner */}
+        {scannerOpen && (
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-200 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <Camera className="w-5 h-5 text-amber-600" />
+                Scan QR Code
+              </h3>
+              <button
+                onClick={stopScanner}
+                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"
+                title="Close scanner"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex justify-center">
+              <div id="qr-reader" className="w-full max-w-md rounded-xl overflow-hidden" ref={scannerContainerRef}></div>
+            </div>
+            <p className="text-xs text-gray-500 text-center mt-3">Point your camera at the QR code on the honey jar label.</p>
           </div>
         )}
 
@@ -158,10 +219,11 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
                 Verify
               </button>
               <button
-                onClick={getSampleBatchId}
-                className="bg-amber-50 text-amber-900 border border-amber-300 px-4 py-3 rounded-xl font-semibold hover:bg-amber-100 transition shrink-0"
+                onClick={startScanner}
+                className="bg-amber-50 text-amber-900 border border-amber-300 px-4 py-3 rounded-xl font-semibold hover:bg-amber-100 transition shrink-0 flex items-center gap-2"
               >
-                Try Sample
+                <Camera className="w-5 h-5" />
+                Scan QR Code
               </button>
             </div>
           </div>
@@ -186,7 +248,7 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
                 )}
                 <div>
                   <h2 className={`text-2xl font-bold ${chainValid.valid ? 'text-green-900' : 'text-red-900'}`}>
-                    {chainValid.valid ? '✓ Verified Authentic KVIC Honey' : '⚠ Tampering Detected on Ledger'}
+                    {chainValid.valid ? 'Verified Authentic KVIC Honey' : 'Tampering Detected on Ledger'}
                   </h2>
                   <p className={`text-sm mt-1 ${chainValid.valid ? 'text-green-700' : 'text-red-700'}`}>
                     {chainValid.valid
@@ -265,8 +327,8 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
                   <CheckCircle className="w-5 h-5 text-amber-600 mt-1 shrink-0" />
                   <div>
                     <p className="text-xs font-semibold text-gray-500 uppercase">KVIC Lab Certification</p>
-                    <p className={`font-semibold ${batch.data.labTested ? 'text-green-600' : 'text-amber-700'}`}>
-                      {batch.data.labTested ? 'KVIC Standard Lab Tested ✓' : 'Awaiting Lab Assay'}
+                    <p className={`font-semibold ${isLabCertified(batch) ? 'text-green-600' : 'text-amber-700'}`}>
+                      {isLabCertified(batch) ? 'KVIC Standard Lab Tested' : 'Awaiting Lab Assay'}
                     </p>
                   </div>
                 </div>
@@ -308,90 +370,6 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
                 </div>
               </div>
             </div>
-
-            {/* QR Code */}
-            {showQR && (
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100 text-center">
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Consumer QR Verification Tag</h3>
-                <p className="text-sm text-gray-600 mb-4">Printable label QR for affixing to KVIC honey retail packaging.</p>
-                <div className="inline-block p-4 bg-white border-4 border-amber-500 rounded-2xl shadow-inner">
-                  <QRCodeSVG value={`https://honeychain.in/consumer?batch=${batch.data.batchId}`} size={200} level="H" />
-                </div>
-                <p className="text-xs font-mono text-amber-800 mt-3 font-semibold">{batch.data.batchId}</p>
-              </div>
-            )}
-
-            {/* Tampering Demo */}
-            <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-2xl shadow-sm border-2 border-purple-200">
-              <div className="flex items-start gap-3 mb-4">
-                <AlertTriangle className="w-6 h-6 text-purple-600 mt-1 shrink-0" />
-                <div>
-                  <h3 className="text-lg font-bold text-purple-900">Judge / Security Demo: Tamper Detection</h3>
-                  <p className="text-sm text-purple-700">
-                    Simulate data falsification on this block to see how SHA-256 chain links instantly catch fraud.
-                  </p>
-                </div>
-              </div>
-
-              {!tamperMode ? (
-                <button
-                  onClick={() => setTamperMode(true)}
-                  className="bg-purple-600 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-purple-700 transition shadow-sm"
-                >
-                  Simulate Data Tampering
-                </button>
-              ) : (
-                <div className="space-y-4 bg-white/80 p-4 rounded-xl border border-purple-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-purple-900 uppercase mb-1">Falsified Quantity (kg)</label>
-                      <input
-                        type="number"
-                        value={tamperData.quantity}
-                        onChange={(e) => setTamperData({ ...tamperData, quantity: e.target.value })}
-                        className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        aria-label="Falsified quantity"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-purple-900 uppercase mb-1">Falsified Location</label>
-                      <input
-                        type="text"
-                        value={tamperData.location}
-                        onChange={(e) => setTamperData({ ...tamperData, location: e.target.value })}
-                        className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        aria-label="Falsified location"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleTamper}
-                      className="bg-red-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-red-700 transition shadow-sm"
-                    >
-                      Apply Tampering
-                    </button>
-                    <button
-                      onClick={() => setTamperMode(false)}
-                      className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg font-semibold hover:bg-gray-300 transition"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {!chainValid.valid && (
-                <div className="mt-4">
-                  <button
-                    onClick={handleRestore}
-                    className="bg-green-600 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-green-700 transition shadow-sm"
-                  >
-                    Restore Blockchain Ledger Integrity
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
         )}
 
@@ -404,7 +382,7 @@ export default function ConsumerVerification({ initialBatchId, onNavigate }) {
             </h3>
             <ol className="list-decimal list-inside space-y-2.5 text-gray-700 text-sm">
               <li>Each honey batch is recorded as a cryptographically linked block on the ledger.</li>
-              <li>Enter the unique batch ID printed on your honey jar label or click <strong>"Try Sample"</strong>.</li>
+              <li>Scan the QR code on your honey jar label using the <strong>"Scan QR Code"</strong> button, or enter the batch ID manually.</li>
               <li>The verification engine re-hashes every previous block to prove zero data manipulation.</li>
               <li>View complete transparent traceability: apiary location, beekeeper identity, and lab results.</li>
               <li>A green badge guarantees 100% authentic pure honey certified under the KVIC Honey Mission.</li>

@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, Package, AlertTriangle, TrendingUp, MapPin, Activity, Shield, Zap, ShieldAlert, Cpu, Plus, Trash2, Edit2, Check, X, CalendarDays } from 'lucide-react';
+import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { Users, Package, AlertTriangle, TrendingUp, MapPin, Activity, Shield, Cpu, Plus, Trash2, Edit2, Check, X, CalendarDays, Award, KeyRound, Copy } from 'lucide-react';
 import { honeyChain } from '../../utils/blockchain';
 import { getNextBeekeeperId, loadBeekeepers, saveBeekeepers } from '../../utils/beekeepers';
-import { simulateBlockchainAttack, getBlockchainHealthReport, demoAttackScenarios, resetBlockchainAfterAttack } from '../../utils/attackDemo';
+import { getBatchLabStatus, getCertificateForBatch, issueLabCertificate, isLabCertified } from '../../utils/labCertificates';
+import { api } from '../../utils/api';
 import toast from 'react-hot-toast';
 
 const getTodayInputDate = () => new Date().toISOString().slice(0, 10);
 const createDefaultFormData = () => ({
   name: '',
-  location: '',
+  state: '',
+  district: '',
+  place: '',
   hives: '',
   rating: '',
   registrationDate: getTodayInputDate(),
@@ -28,14 +31,14 @@ function formatClusterDate(dateValue) {
   });
 }
 
-export default function AdminDashboard({ onNavigate }) {
-  const [showSecurityDemo, setShowSecurityDemo] = useState(false);
-  const [attackResult, setAttackResult] = useState(null);
+export default function AdminDashboard() {
   const [beekeepers, setBeekeepers] = useState(loadBeekeepers());
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState(createDefaultFormData());
-  const [, setChainStatusVersion] = useState(0);
+  const [formErrors, setFormErrors] = useState({});
+  const [, forceLabRefresh] = useState(0);
+  const [, forceLedgerRefresh] = useState(0);
 
   const allBatches = honeyChain.getAllBatches();
   const chainValidation = honeyChain.isChainValid();
@@ -43,18 +46,57 @@ export default function AdminDashboard({ onNavigate }) {
   // Aggregate stats
   const totalBatches = allBatches.length;
   const totalQuantity = allBatches.reduce((sum, block) => sum + (block.data.quantity || 0), 0);
-  const labTestedCount = allBatches.filter(block => block.data.labTested).length;
+  const labTestedCount = allBatches.filter(block => isLabCertified(block)).length;
   const totalBeekeepers = beekeepers.length;
 
-  // Regional distribution
-  const regionData = beekeepers.map(bk => ({
-    name: bk.location.split(',')[1]?.trim() || bk.location,
-    batches: honeyChain.getBatchesByBeekeeper(bk.id).length,
-    beekeeper: bk.name,
-  }));
+  // State-wise production leaderboard (ranked by total harvest volume)
+  const stateLeaderboard = beekeepers.reduce((acc, bk) => {
+    const state = bk.location.split(',').pop()?.trim() || 'Unknown State';
+    const bkBatches = honeyChain.getBatchesByBeekeeper(bk.id);
+    const quantity = bkBatches.reduce((sum, block) => sum + (block.data.quantity || 0), 0);
 
-  const handleDeleteBeekeeper = (bk) => {
+    if (!acc[state]) {
+      acc[state] = { state, quantity: 0, batches: 0, beekeepers: 0 };
+    }
+    acc[state].quantity += quantity;
+    acc[state].batches += bkBatches.length;
+    acc[state].beekeepers += 1;
+    return acc;
+  }, {});
+  const stateLeaderboardList = Object.values(stateLeaderboard).sort((a, b) => b.quantity - a.quantity);
+
+  const copyToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Lab Certificate code copied to clipboard');
+    } catch {
+      toast.info(`Lab Certificate code: ${text}`);
+    }
+  };
+
+  const handleIssueLabCode = async (block) => {
+    try {
+      await api.batches.approve(block.data.batchId);
+    } catch {
+      // fallback
+    }
+    const result = issueLabCertificate(block.data.batchId, block.data.beekeeperId, block.data.beekeeper);
+    if (result.ok) {
+      forceLabRefresh(v => v + 1);
+      toast.success(`Lab Certificate Verification Code issued: ${result.code}`);
+    } else {
+      toast.error(result.error);
+    }
+  };
+
+  const handleDeleteBeekeeper = async (bk) => {
     if (!confirm(`Are you sure you want to delete "${bk.name}" and all their batches?`)) return;
+
+    try {
+      await api.beekeepers.delete(bk.id);
+    } catch {
+      // fallback
+    }
 
     const result = honeyChain.deleteBeekeeper(bk.id);
     if (result) {
@@ -66,26 +108,64 @@ export default function AdminDashboard({ onNavigate }) {
     }
   };
 
-  const handleAddBeekeeper = () => {
+  const handleResetChain = async () => {
+    try {
+      await api.batches.restoreDemo();
+    } catch {
+      // fallback
+    }
+    honeyChain.resetChain();
+    setBeekeepers(loadBeekeepers());
+    forceLedgerRefresh(v => v + 1);
+    forceLabRefresh(v => v + 1);
+    toast.success('Blockchain ledger reset to genesis block!');
+  };
+
+  const handleAddBeekeeper = async () => {
     if (!formData.name.trim()) {
       toast.error('Please enter a beekeeper name');
       return;
     }
-    if (!formData.location.trim()) {
-      toast.error('Please enter a location');
+    if (/[^a-zA-Z\s]/.test(formData.name)) {
+      toast.error('Beekeeper name must contain only alphabets and spaces');
       return;
     }
+    if (!formData.state.trim() || !formData.district.trim() || !formData.place.trim()) {
+      toast.error('Please fill in State, District, and Place');
+      return;
+    }
+
+    const hiveList = formData.hives ? formData.hives.split(',').map(h => h.trim()).filter(Boolean) : [];
+    const invalidHive = hiveList.find(h => !/^HIVE\d{3}$/.test(h));
+    if (invalidHive) {
+      toast.error(`Invalid Hive ID "${invalidHive}". Use format HIVE001-HIVE999.`);
+      return;
+    }
+
+    const location = `${formData.place.trim()}, ${formData.district.trim()}, ${formData.state.trim()}`;
 
     const newId = getNextBeekeeperId(beekeepers);
     const newBeekeeper = {
       id: newId,
       name: formData.name.trim(),
-      location: formData.location.trim(),
+      location,
       hives: formData.hives ? formData.hives.split(',').map(h => h.trim()).filter(Boolean) : [],
       registrationDate: formData.registrationDate || getTodayInputDate(),
       totalBatches: 0,
-      rating: parseFloat(formData.rating) || 4.5,
+      rating: Math.min(parseFloat(formData.rating) || 4.5, 5),
     };
+
+    try {
+      await api.beekeepers.create({
+        name: newBeekeeper.name,
+        location: newBeekeeper.location,
+        hives: newBeekeeper.hives,
+        rating: newBeekeeper.rating,
+        registrationDate: newBeekeeper.registrationDate,
+      });
+    } catch {
+      // fallback
+    }
 
     const updated = [...beekeepers, newBeekeeper];
     saveBeekeepers(updated);
@@ -97,23 +177,51 @@ export default function AdminDashboard({ onNavigate }) {
 
   const handleEditBeekeeper = (bk) => {
     setEditingId(bk.id);
+    const locParts = bk.location.split(',').map(s => s.trim());
     setFormData({
       name: bk.name,
-      location: bk.location,
+      state: locParts[2] || '',
+      district: locParts[1] || '',
+      place: locParts[0] || '',
       hives: bk.hives.join(', '),
       rating: bk.rating,
       registrationDate: bk.registrationDate || getTodayInputDate(),
     });
   };
 
-  const handleSaveEdit = (bk) => {
+  const handleSaveEdit = async (bk) => {
     if (!formData.name.trim()) {
       toast.error('Please enter a beekeeper name');
       return;
     }
-    if (!formData.location.trim()) {
-      toast.error('Please enter a location');
+    if (/[^a-zA-Z\s]/.test(formData.name)) {
+      toast.error('Beekeeper name must contain only alphabets and spaces');
       return;
+    }
+    if (!formData.state.trim() || !formData.district.trim() || !formData.place.trim()) {
+      toast.error('Please fill in State, District, and Place');
+      return;
+    }
+
+    const hiveList = formData.hives ? formData.hives.split(',').map(h => h.trim()).filter(Boolean) : [];
+    const invalidHive = hiveList.find(h => !/^HIVE\d{3}$/.test(h));
+    if (invalidHive) {
+      toast.error(`Invalid Hive ID "${invalidHive}". Use format HIVE001-HIVE999.`);
+      return;
+    }
+
+    const location = `${formData.place.trim()}, ${formData.district.trim()}, ${formData.state.trim()}`;
+
+    try {
+      await api.beekeepers.update(bk.id, {
+        name: formData.name.trim(),
+        location,
+        hives: hiveList,
+        rating: Math.min(parseFloat(formData.rating) || 4.5, 5),
+        registrationDate: formData.registrationDate || getTodayInputDate(),
+      });
+    } catch {
+      // fallback
     }
 
     const updated = beekeepers.map(b => {
@@ -121,10 +229,10 @@ export default function AdminDashboard({ onNavigate }) {
         return {
           ...b,
           name: formData.name.trim(),
-          location: formData.location.trim(),
+          location,
           hives: formData.hives ? formData.hives.split(',').map(h => h.trim()).filter(Boolean) : [],
           registrationDate: formData.registrationDate || getTodayInputDate(),
-          rating: parseFloat(formData.rating) || 4.5,
+          rating: Math.min(parseFloat(formData.rating) || 4.5, 5),
         };
       }
       return b;
@@ -159,27 +267,6 @@ export default function AdminDashboard({ onNavigate }) {
 
   const COLORS = ['#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
 
-  const handleAttack = (attackType) => {
-    const result = simulateBlockchainAttack(attackType);
-    setAttackResult(result);
-    setChainStatusVersion(version => version + 1);
-
-    if (result.success) {
-      toast.error(`🚨 Attack Simulated: ${result.attackType}`);
-    } else {
-      toast.error(result.message);
-    }
-  };
-
-  const handleResetChain = () => {
-    const result = resetBlockchainAfterAttack();
-    setAttackResult(null);
-    setChainStatusVersion(version => version + 1);
-    toast.success(result.message);
-  };
-
-  const healthReport = getBlockchainHealthReport();
-
   return (
     <div className="min-h-screen bg-amber-50/30 p-6">
       <div className="max-w-7xl mx-auto">
@@ -193,28 +280,9 @@ export default function AdminDashboard({ onNavigate }) {
             KVIC Honey Mission Control Center
           </h1>
           <p className="text-gray-600 mt-1">
-            Real-time analytics across regional beekeeper clusters, honey yield volumes, and blockchain ledger health.
+            Real-time analytics across state beekeeper clusters, honey yield volumes, blockchain ledger health, and lab certification workflow.
           </p>
         </div>
-
-        {/* Quick Nav Shortcuts */}
-        {onNavigate && (
-          <div className="mb-6 flex flex-wrap items-center gap-3 text-sm bg-white p-3.5 rounded-xl border border-amber-100 shadow-sm">
-            <span className="text-gray-500 font-medium">Quick Navigate:</span>
-            <button
-              onClick={() => onNavigate('beekeeper')}
-              className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-900 rounded-lg hover:bg-amber-100 font-medium transition border border-amber-200 text-xs"
-            >
-              ← Beekeeper Portal
-            </button>
-            <button
-              onClick={() => onNavigate('consumer')}
-              className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-900 rounded-lg hover:bg-amber-100 font-medium transition border border-amber-200 text-xs"
-            >
-              Consumer QR Verification →
-            </button>
-          </div>
-        )}
 
         {/* Chain Status Alert */}
         <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 border shadow-sm ${
@@ -292,22 +360,31 @@ export default function AdminDashboard({ onNavigate }) {
 
         {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* Regional Distribution */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-amber-100">
-            <h2 className="text-lg font-bold text-gray-900 mb-1">Regional Production Distribution</h2>
-            <p className="text-xs text-gray-500 mb-4">Harvest batch counts by geographic cluster</p>
-            {regionData.length > 0 ? (
+          {/* State-wise Production Leaderboard */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-amber-100 flex flex-col items-center">
+            <div className="flex items-center gap-2 mb-1">
+              <Award className="w-4 h-4 text-amber-600" />
+              <h2 className="text-lg font-bold text-gray-900">State-wise Production Leaderboard</h2>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Top honey-producing states ranked by total harvest volume</p>
+            {stateLeaderboardList.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={regionData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} />
-                  <Tooltip />
-                  <Bar dataKey="batches" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                <BarChart data={stateLeaderboardList} layout="vertical" margin={{ top: 0, right: 32, left: 32, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                  <XAxis type="number" tickFormatter={(v) => `${v} kg`} tick={{ fontSize: 11, fill: '#78716c' }} axisLine={false} />
+                  <YAxis type="category" dataKey="state" width={100} tick={{ fontSize: 11, fill: '#44403c' }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    formatter={(value) => [`${Number(value).toFixed(1)} kg`, 'Harvest Volume']}
+                    labelFormatter={(label) => {
+                      const entry = stateLeaderboardList.find(e => e.state === label);
+                      return entry ? `${label} · ${entry.batches} batch${entry.batches === 1 ? '' : 'es'} · ${entry.beekeepers} beekeeper${entry.beekeepers === 1 ? '' : 's'}` : label;
+                    }}
+                  />
+                  <Bar dataKey="quantity" fill="#f59e0b" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <p className="text-gray-500 text-center py-12">No data available</p>
+              <p className="text-gray-500 text-center py-12">No state data available</p>
             )}
           </div>
 
@@ -365,23 +442,78 @@ export default function AdminDashboard({ onNavigate }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
                 <input
                   type="text"
-                  placeholder="Beekeeper Name"
+                  placeholder="Beekeeper Name (alphabets only)"
                   value={formData.name}
-                  onChange={e => setFormData({ ...formData, name: e.target.value })}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (/^[a-zA-Z\s]*$/.test(val)) {
+                      setFormData({ ...formData, name: val });
+                    }
+                  }}
+                  className="px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                />
+                <select
+                  value={formData.state}
+                  onChange={e => setFormData({ ...formData, state: e.target.value })}
+                  className="px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                >
+                  <option value="">Select State</option>
+                  <option value="Karnataka">Karnataka</option>
+                  <option value="Kerala">Kerala</option>
+                  <option value="Tamil Nadu">Tamil Nadu</option>
+                  <option value="Andhra Pradesh">Andhra Pradesh</option>
+                  <option value="Telangana">Telangana</option>
+                  <option value="Maharashtra">Maharashtra</option>
+                  <option value="Gujarat">Gujarat</option>
+                  <option value="Rajasthan">Rajasthan</option>
+                  <option value="Madhya Pradesh">Madhya Pradesh</option>
+                  <option value="West Bengal">West Bengal</option>
+                  <option value="Uttar Pradesh">Uttar Pradesh</option>
+                  <option value="Haryana">Haryana</option>
+                  <option value="Punjab">Punjab</option>
+                  <option value="Himachal Pradesh">Himachal Pradesh</option>
+                  <option value="Uttarakhand">Uttarakhand</option>
+                  <option value="Assam">Assam</option>
+                  <option value="Meghalaya">Meghalaya</option>
+                  <option value="Nagaland">Nagaland</option>
+                  <option value="Manipur">Manipur</option>
+                  <option value="Mizoram">Mizoram</option>
+                  <option value="Tripura">Tripura</option>
+                  <option value="Odisha">Odisha</option>
+                  <option value="Bihar">Bihar</option>
+                  <option value="Jharkhand">Jharkhand</option>
+                  <option value="Chhattisgarh">Chhattisgarh</option>
+                  <option value="Goa">Goa</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="District (e.g. Bangalore)"
+                  value={formData.district}
+                  onChange={e => setFormData({ ...formData, district: e.target.value })}
                   className="px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
                 />
                 <input
                   type="text"
-                  placeholder="Apiary Location (e.g. Sundarbans, West Bengal)"
-                  value={formData.location}
-                  onChange={e => setFormData({ ...formData, location: e.target.value })}
+                  placeholder="Place (e.g. Whitefield)"
+                  value={formData.place}
+                  onChange={e => setFormData({ ...formData, place: e.target.value })}
                   className="px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
                 />
                 <input
                   type="text"
-                  placeholder="IoT Hives (comma separated, e.g. HIVE001, HIVE002)"
+                  placeholder="IoT Hives (e.g. HIVE001, HIVE002)"
                   value={formData.hives}
-                  onChange={e => setFormData({ ...formData, hives: e.target.value })}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setFormData({ ...formData, hives: val });
+                    const hiveList = val.split(',').map(h => h.trim()).filter(Boolean);
+                    const invalid = hiveList.some(h => !/^HIVE\d{3}$/.test(h));
+                    if (invalid) {
+                      setFormErrors(prev => ({ ...prev, hives: 'Invalid Hive ID. Use HIVE001-HIVE999.' }));
+                    } else {
+                      setFormErrors(prev => ({ ...prev, hives: '' }));
+                    }
+                  }}
                   className="px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
                 />
                 <input
@@ -393,15 +525,25 @@ export default function AdminDashboard({ onNavigate }) {
                 />
                 <input
                   type="number"
-                  placeholder="Rating (e.g. 4.5)"
+                  placeholder="Rating (max 5)"
                   min="0"
                   max="5"
                   step="0.1"
                   value={formData.rating}
-                  onChange={e => setFormData({ ...formData, rating: e.target.value })}
+                  onChange={e => {
+                    const val = parseFloat(e.target.value);
+                    if (isNaN(val)) {
+                      setFormData({ ...formData, rating: '' });
+                    } else {
+                      setFormData({ ...formData, rating: Math.min(val, 5) });
+                    }
+                  }}
                   className="px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
                 />
               </div>
+              {formErrors.hives && (
+                <p className="text-xs text-red-600 mb-2">{formErrors.hives}</p>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   onClick={editingId ? () => handleSaveEdit(beekeepers.find(b => b.id === editingId)) : handleAddBeekeeper}
@@ -452,25 +594,23 @@ export default function AdminDashboard({ onNavigate }) {
                           <input
                             type="text"
                             value={formData.name}
-                            onChange={e => setFormData({ ...formData, name: e.target.value })}
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (/^[a-zA-Z\s]*$/.test(val)) {
+                                setFormData({ ...formData, name: val });
+                              }
+                            }}
                             className="px-2 py-1 text-sm border border-amber-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400 w-full"
                           />
                         ) : (
                           bk.name
                         )}
                       </td>
-                      <td className="py-3 px-4 text-sm text-gray-700 flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-amber-600" />
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={formData.location}
-                            onChange={e => setFormData({ ...formData, location: e.target.value })}
-                            className="px-2 py-1 text-sm border border-amber-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400 w-full"
-                          />
-                        ) : (
-                          bk.location
-                        )}
+                      <td className="py-3 px-4 text-sm text-gray-700">
+                        <span className="flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          {bk.location}
+                        </span>
                       </td>
                       <td className="py-3 px-4 text-sm text-gray-700">
                         {isEditing ? (
@@ -505,7 +645,14 @@ export default function AdminDashboard({ onNavigate }) {
                             max="5"
                             step="0.1"
                             value={formData.rating}
-                            onChange={e => setFormData({ ...formData, rating: e.target.value })}
+                            onChange={e => {
+                              const val = parseFloat(e.target.value);
+                              if (isNaN(val)) {
+                                setFormData({ ...formData, rating: '' });
+                              } else {
+                                setFormData({ ...formData, rating: Math.min(val, 5) });
+                              }
+                            }}
                             className="px-2 py-1 text-sm border border-amber-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400 w-20"
                           />
                         ) : (
@@ -538,6 +685,105 @@ export default function AdminDashboard({ onNavigate }) {
                     </tr>
                   );
                 }))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Lab Certification & Verification Center */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-amber-100 mb-8">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <KeyRound className="w-4 h-4 text-amber-600" />
+                <h2 className="text-lg font-bold text-gray-900">Lab Certification & Verification Center</h2>
+              </div>
+              <p className="text-xs text-gray-500">
+                Verify honey samples, approve batches, and issue secure Lab Certificate Verification Codes for beekeepers to apply on their registered batches.
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200 bg-amber-50/50">
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-amber-900 uppercase">Batch ID</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-amber-900 uppercase">Beekeeper</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-amber-900 uppercase">Hive</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-amber-900 uppercase">Quantity</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-amber-900 uppercase">Harvest Date</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-amber-900 uppercase">Lab Status</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-amber-900 uppercase">Issue Lab Certificate Code</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {allBatches.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-gray-400 text-sm">
+                      No honey batches on the ledger yet.
+                    </td>
+                  </tr>
+                ) : (
+                  [...allBatches].reverse().map(block => {
+                    const status = getBatchLabStatus(block);
+                    const certificate = getCertificateForBatch(block.data.batchId);
+                    return (
+                      <tr key={block.data.batchId} className="hover:bg-amber-50/40 transition">
+                        <td className="py-3 px-4 text-sm font-mono font-medium text-amber-700">{block.data.batchId}</td>
+                        <td className="py-3 px-4 text-sm text-gray-900">{block.data.beekeeper}</td>
+                        <td className="py-3 px-4 text-sm text-gray-700">{block.data.hiveId}</td>
+                        <td className="py-3 px-4 text-sm text-gray-700">{block.data.quantity} kg</td>
+                        <td className="py-3 px-4 text-sm text-gray-600">
+                          {new Date(block.data.harvestDate).toLocaleDateString()}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
+                            status === 'certified'
+                              ? 'bg-green-100 text-green-700'
+                              : status === 'issued'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {status === 'certified'
+                              ? 'Lab Verified'
+                              : status === 'issued'
+                                ? 'Code Issued'
+                                : 'Pending Approval'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {status === 'pending' && (
+                            <button
+                              onClick={() => handleIssueLabCode(block)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition shadow-sm"
+                            >
+                              <Shield className="w-3.5 h-3.5" />
+                              Verify & Issue Lab Code
+                            </button>
+                          )}
+                          {status === 'issued' && certificate && (
+                            <div className="flex items-center gap-2">
+                              <code className="px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-xs font-mono font-semibold text-blue-800">
+                                {certificate.code}
+                              </code>
+                              <button
+                                onClick={() => copyToClipboard(certificate.code)}
+                                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-semibold hover:underline"
+                                title="Copy code to share with beekeeper"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                                Copy
+                              </button>
+                            </div>
+                          )}
+                          {status === 'certified' && (
+                            <span className="text-xs text-green-700 font-medium">✓ Certificate applied by beekeeper</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -620,134 +866,6 @@ export default function AdminDashboard({ onNavigate }) {
               </ul>
             </div>
           </div>
-        </div>
-
-        {/* Security Demo Section */}
-        <div className="bg-gradient-to-r from-red-50 to-orange-50 p-6 rounded-2xl shadow-sm border border-red-200">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <ShieldAlert className="w-8 h-8 text-red-600 shrink-0" />
-              <div>
-                <h2 className="text-lg font-bold text-red-900">Security Demo: Cryptographic Attack Simulation</h2>
-                <p className="text-xs text-red-700">Demonstrate blockchain tamper resistance for evaluation judges</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowSecurityDemo(!showSecurityDemo)}
-              className="bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-red-700 transition shadow-sm"
-            >
-              {showSecurityDemo ? 'Hide Simulation Panel' : 'Launch Simulation Panel'}
-            </button>
-          </div>
-
-          {showSecurityDemo && (
-            <div className="space-y-6 mt-6">
-              {/* Blockchain Health Status */}
-              <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
-                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2 text-sm">
-                  <Activity className="w-4 h-4 text-amber-600" />
-                  Live Blockchain Integrity Health Report
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <p className="text-xs text-gray-500 uppercase font-semibold">Total Blocks</p>
-                    <p className="text-2xl font-bold text-gray-900">{healthReport.totalBlocks}</p>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <p className="text-xs text-gray-500 uppercase font-semibold">Total Batches</p>
-                    <p className="text-2xl font-bold text-gray-900">{healthReport.totalBatches}</p>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <p className="text-xs text-gray-500 uppercase font-semibold">Chain Status</p>
-                    <p className={`text-2xl font-bold ${healthReport.chainValid ? 'text-green-600' : 'text-red-600'}`}>
-                      {healthReport.chainValid ? '✓ Intact' : '✗ Compromised'}
-                    </p>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <p className="text-xs text-gray-500 uppercase font-semibold">Tampered Block</p>
-                    <p className="text-2xl font-bold text-red-600">
-                      {healthReport.tamperedBlock !== null ? `#${healthReport.tamperedBlock}` : 'None'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Attack Scenarios */}
-              <div>
-                <h3 className="font-bold text-gray-900 mb-3 text-sm">Simulate Real-World Attack Scenarios</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {demoAttackScenarios.map((scenario) => (
-                    <div
-                      key={scenario.id}
-                      className="bg-white p-5 rounded-xl border border-gray-200 hover:border-red-400 transition shadow-xs flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-2xl">{scenario.icon}</span>
-                          <span
-                            className={`text-xs px-2.5 py-0.5 rounded-full font-bold ${
-                              scenario.severity === 'CRITICAL'
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-orange-100 text-orange-700'
-                            }`}
-                          >
-                            {scenario.severity}
-                          </span>
-                        </div>
-                        <h4 className="font-bold text-gray-900 text-sm mb-1">{scenario.name}</h4>
-                        <p className="text-xs text-gray-600 mb-4">{scenario.description}</p>
-                      </div>
-                      <button
-                        onClick={() => handleAttack(scenario.id)}
-                        className="w-full bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-semibold hover:bg-red-700 transition flex items-center justify-center gap-1.5 shadow-sm"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        Simulate Attack
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Attack Result */}
-              {attackResult && attackResult.success && (
-                <div className="bg-red-100/80 border-2 border-red-400 p-5 rounded-xl">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="w-6 h-6 text-red-600 shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <h3 className="font-bold text-red-900 mb-2">
-                        🚨 Attack Simulated: {attackResult.attackType}
-                      </h3>
-                      <div className="space-y-1 text-xs text-red-800">
-                        <p><strong>Action Executed:</strong> {attackResult.message}</p>
-                        <p><strong>Target Block:</strong> #{attackResult.targetBlock}</p>
-                        <p><strong>Target Batch ID:</strong> <span className="font-mono">{attackResult.batchId}</span></p>
-                        <p className="bg-red-200/80 p-2 rounded-lg mt-2">
-                          <strong>Cryptographic Detection:</strong> {attackResult.detection}
-                        </p>
-                      </div>
-                      <div className="mt-4 flex flex-wrap gap-3 items-center">
-                        {onNavigate && (
-                          <button
-                            onClick={() => onNavigate('consumer', attackResult.batchId)}
-                            className="bg-red-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-red-800 transition"
-                          >
-                            Test Tampered Batch in Consumer View →
-                          </button>
-                        )}
-                        <button
-                          onClick={handleResetChain}
-                          className="bg-green-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-green-700 transition"
-                        >
-                          Reset Blockchain to Valid State
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>

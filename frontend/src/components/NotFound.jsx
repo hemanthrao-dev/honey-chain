@@ -32,7 +32,7 @@ export default function NotFound({ onNavigate }) {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
-              onClick={() => onNavigate('beekeeper')}
+              onClick={() => onNavigate('beekeepers')}
               className="flex flex-col items-center gap-3 p-6 bg-amber-50 rounded-xl hover:bg-amber-100 transition border-2 border-amber-200 hover:border-amber-400"
             >
               <Home className="w-8 h-8 text-amber-600" />
@@ -43,7 +43,7 @@ export default function NotFound({ onNavigate }) {
             </button>
 
             <button
-              onClick={() => onNavigate('consumer')}
+              onClick={() => onNavigate('consumers')}
               className="flex flex-col items-center gap-3 p-6 bg-green-50 rounded-xl hover:bg-green-100 transition border-2 border-green-200 hover:border-green-400"
             >
               <Search className="w-8 h-8 text-green-600" />

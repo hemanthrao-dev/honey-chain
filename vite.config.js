@@ -4,8 +4,12 @@ import tailwindcss from '@tailwindcss/vite';
 
 // https://vite.dev/config/
 export default defineConfig({
+  root: 'frontend',
+  base: process.env.NODE_ENV === 'production' ? '/honey-chain/' : '/',
   plugins: [react(), tailwindcss()],
   build: {
+    outDir: '../dist',
+    emptyOutDir: true,
     // Disable source maps in production for security and cleaner bundle
     sourcemap: false,
     // Production optimizations
@@ -35,4 +39,5 @@ export default defineConfig({
       'Referrer-Policy': 'strict-origin-when-cross-origin',
     },
   },
+  base: "/honey-chain",
 });

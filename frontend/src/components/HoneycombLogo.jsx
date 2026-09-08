@@ -25,7 +25,7 @@ export default function HoneycombLogo({ className = "w-10 h-10" }) {
       <polygon
         points={hexagon(60, 25, smallSize)}
         fill="none"
-        stroke="#FFFFFF"
+        stroke="currentColor"
         strokeWidth="4"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -35,7 +35,7 @@ export default function HoneycombLogo({ className = "w-10 h-10" }) {
       <polygon
         points={hexagon(35, 55, size)}
         fill="none"
-        stroke="#FFFFFF"
+        stroke="currentColor"
         strokeWidth="4"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -45,7 +45,7 @@ export default function HoneycombLogo({ className = "w-10 h-10" }) {
       <polygon
         points={hexagon(60, 48, size)}
         fill="none"
-        stroke="#FFFFFF"
+        stroke="currentColor"
         strokeWidth="4"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -55,7 +55,7 @@ export default function HoneycombLogo({ className = "w-10 h-10" }) {
       <polygon
         points={hexagon(85, 55, size)}
         fill="none"
-        stroke="#FFFFFF"
+        stroke="currentColor"
         strokeWidth="4"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -73,7 +73,7 @@ export default function HoneycombLogo({ className = "w-10 h-10" }) {
            M 60,115
            L 60,130"
         fill="none"
-        stroke="#FFFFFF"
+        stroke="currentColor"
         strokeWidth="4"
         strokeLinecap="round"
         strokeLinejoin="round"

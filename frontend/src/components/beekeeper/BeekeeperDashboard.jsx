@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { Package, TrendingUp, AlertTriangle, CheckCircle, ArrowRight, Shield, BarChart3, Sparkles, Trash2 } from 'lucide-react';
+import { Package, TrendingUp, AlertTriangle, CheckCircle, ArrowRight, BarChart3, Sparkles, Trash2, QrCode, KeyRound } from 'lucide-react';
+import QRCode from 'qrcode';
 import { honeyChain } from '../../utils/blockchain';
 import { generateSensorData, detectAlerts, predictYield, floralSources } from '../../utils/mockData';
 import { loadBeekeepers } from '../../utils/beekeepers';
 import { sanitizeString } from '../../utils/validation';
+import { applyLabCode, getBatchLabStatus } from '../../utils/labCertificates';
+import { api } from '../../utils/api';
 import SensorChart from '../SensorChart';
 import toast from 'react-hot-toast';
 
@@ -20,12 +23,12 @@ export default function BeekeeperDashboard({ onNavigate }) {
   const [alerts, setAlerts] = useState(() => (sensorData.length > 0 ? detectAlerts(sensorData) : []));
   const [prediction, setPrediction] = useState(() => (sensorData.length > 0 ? predictYield(sensorData) : null));
   const [showBatchForm, setShowBatchForm] = useState(false);
+  const [applyingBatchId, setApplyingBatchId] = useState('');
+  const [labCodeDraft, setLabCodeDraft] = useState('');
 
-  // Form state
   const [formData, setFormData] = useState({
     quantity: '',
     floralSource: floralSources[0],
-    labTested: false,
     notes: '',
   });
 
@@ -60,7 +63,7 @@ export default function BeekeeperDashboard({ onNavigate }) {
     setPrediction(predictYield(newSensorData));
   };
 
-  const handleRegisterBatch = (e) => {
+  const handleRegisterBatch = async (e) => {
     e.preventDefault();
 
     if (!selectedBeekeeper) {
@@ -73,14 +76,12 @@ export default function BeekeeperDashboard({ onNavigate }) {
       return;
     }
 
-    // Validate quantity
     const quantity = parseFloat(formData.quantity);
     if (isNaN(quantity) || quantity <= 0 || quantity > 1000) {
       toast.error('Please enter a valid quantity (0-1000 kg)');
       return;
     }
 
-    // Validate notes length
     if (formData.notes && formData.notes.length > 500) {
       toast.error('Notes too long (max 500 characters)');
       return;
@@ -98,20 +99,30 @@ export default function BeekeeperDashboard({ onNavigate }) {
       floralSource: sanitizeString(formData.floralSource),
       location: sanitizeString(selectedBeekeeper.location),
       harvestDate: new Date().toISOString(),
-      labTested: formData.labTested,
       notes: sanitizeString(formData.notes),
-      status: 'registered',
+      status: 'pending_review',
     };
+
+    try {
+      await api.batches.create({
+        beekeeperId: selectedBeekeeper.id,
+        hiveId: selectedHive,
+        quantity: quantity,
+        floralSource: formData.floralSource,
+        notes: formData.notes,
+      });
+    } catch {
+      // fallback to local blockchain
+    }
 
     try {
       honeyChain.addBlock(batchData);
       setBatches(honeyChain.getBatchesByBeekeeper(selectedBeekeeper.id));
-      toast.success(`Batch ${batchId} registered on blockchain!`);
+      toast.success(`Batch ${batchId} registered on the ledger & sent to KVIC Admin for lab verification!`);
 
       setFormData({
         quantity: '',
         floralSource: floralSources[0],
-        labTested: false,
         notes: '',
       });
       setShowBatchForm(false);
@@ -121,8 +132,38 @@ export default function BeekeeperDashboard({ onNavigate }) {
     }
   };
 
-  const handleDeleteBatch = (batchId) => {
+  const handleApplyLabCode = async (block) => {
+    const code = labCodeDraft.trim().toUpperCase();
+    if (!code) {
+      toast.error('Enter the Lab Certificate Verification Code issued by KVIC Admin');
+      return;
+    }
+
+    try {
+      await api.batches.verifyCode(block.data.batchId, code);
+    } catch {
+      // fallback
+    }
+
+    const result = applyLabCode(block.data.batchId, selectedBeekeeper.id, code);
+    if (result.ok) {
+      setApplyingBatchId('');
+      setLabCodeDraft('');
+      setBatches(honeyChain.getBatchesByBeekeeper(selectedBeekeeper.id));
+      toast.success(`Batch ${block.data.batchId} authenticated & Lab Verified!`);
+    } else {
+      toast.error(result.error);
+    }
+  };
+
+  const handleDeleteBatch = async (batchId) => {
     if (!confirm(`Delete honey batch ${batchId}? This removes it from the local blockchain demo.`)) return;
+
+    try {
+      await api.batches.delete(batchId);
+    } catch {
+      // fallback
+    }
 
     const deleted = honeyChain.deleteBatch(batchId);
     if (!deleted) {
@@ -132,6 +173,30 @@ export default function BeekeeperDashboard({ onNavigate }) {
 
     setBatches(honeyChain.getBatchesByBeekeeper(selectedBeekeeper.id));
     toast.success(`Deleted batch ${batchId}`);
+  };
+
+  const handleDownloadQR = async (batchId) => {
+    try {
+      const qrValue = `https://honeychain.in/consumer?batch=${batchId}`;
+      const dataUrl = await QRCode.toDataURL(qrValue, {
+        width: 400,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff',
+        },
+      });
+
+      const downloadLink = document.createElement('a');
+      downloadLink.href = dataUrl;
+      downloadLink.download = `QR-${batchId}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      toast.success(`QR code downloaded for ${batchId}`);
+    } catch {
+      toast.error('Failed to generate QR code');
+    }
   };
 
   if (!selectedBeekeeper) {
@@ -211,27 +276,6 @@ export default function BeekeeperDashboard({ onNavigate }) {
               ))}
             </select>
           </div>
-
-          {/* Quick Nav Shortcuts */}
-          {onNavigate && (
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-gray-500 hidden sm:inline">Jump to:</span>
-              <button
-                onClick={() => onNavigate('consumer')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 transition font-medium border border-amber-200"
-              >
-                <Shield className="w-3.5 h-3.5 text-amber-600" />
-                Consumer Verification
-              </button>
-              <button
-                onClick={() => onNavigate('admin')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 transition font-medium border border-amber-200"
-              >
-                <BarChart3 className="w-3.5 h-3.5 text-amber-600" />
-                KVIC Analytics
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Stats Cards */}
@@ -291,7 +335,7 @@ export default function BeekeeperDashboard({ onNavigate }) {
         {showBatchForm && hasHive && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-amber-200 mb-8">
             <h2 className="text-xl font-bold text-gray-900 mb-1">Register Honey Batch on Ledger</h2>
-            <p className="text-sm text-gray-600 mb-4">Each batch receives an immutable SHA-256 block hash for consumer QR verification.</p>
+            <p className="text-sm text-gray-600 mb-4">Each batch is recorded immutably on the SHA-256 ledger and sent to KVIC Admin for purity verification & lab testing. Once approved, you can apply the Lab Certificate Verification Code issued by the admin.</p>
             <form onSubmit={handleRegisterBatch} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -329,18 +373,6 @@ export default function BeekeeperDashboard({ onNavigate }) {
                       <option key={source} value={source}>{source}</option>
                     ))}
                   </select>
-                </div>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="labTested"
-                    checked={formData.labTested}
-                    onChange={(e) => setFormData({ ...formData, labTested: e.target.checked })}
-                    className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500"
-                  />
-                  <label htmlFor="labTested" className="ml-2 text-sm font-medium text-gray-700">
-                    KVIC Lab Quality Tested
-                  </label>
                 </div>
               </div>
               <div>
@@ -413,10 +445,8 @@ export default function BeekeeperDashboard({ onNavigate }) {
 
           {hasHive ? (
             <>
-              {/* Sensor Charts */}
               <SensorChart data={sensorData} />
 
-              {/* Yield Prediction */}
               {prediction && (
                 <div className="mt-6 bg-gradient-to-br from-amber-500/10 via-yellow-500/10 to-orange-500/10 p-6 rounded-xl border border-amber-200">
                   <div className="flex items-center gap-2 mb-3">
@@ -486,32 +516,85 @@ export default function BeekeeperDashboard({ onNavigate }) {
                         {new Date(block.data.harvestDate).toLocaleDateString()}
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
-                          block.data.labTested
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {block.data.labTested ? 'Lab Tested ✓' : 'Pending Test'}
-                        </span>
+                        {getBatchLabStatus(block) === 'certified' ? (
+                          <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">
+                            Lab Verified ✓
+                          </span>
+                        ) : getBatchLabStatus(block) === 'issued' ? (
+                          <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700">
+                            Code Issued
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+                            Pending Lab Verification
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <div className="flex justify-end gap-3">
-                          {onNavigate && (
+                        {applyingBatchId === block.data.batchId ? (
+                          <div className="flex flex-col items-end gap-2">
+                            <input
+                              autoFocus
+                              type="text"
+                              value={labCodeDraft}
+                              onChange={(e) => setLabCodeDraft(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleApplyLabCode(block)}
+                              placeholder="Enter KVIC-XXXX-XXXX code"
+                              className="w-full max-w-[240px] sm:w-64 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
+                              maxLength="20"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleApplyLabCode(block)}
+                                className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-green-700 transition"
+                              >
+                                Apply Code
+                              </button>
+                              <button
+                                onClick={() => { setApplyingBatchId(''); setLabCodeDraft(''); }}
+                                className="text-xs bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-300 transition"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex justify-end items-center gap-2">
+                            {getBatchLabStatus(block) !== 'certified' && (
+                              <button
+                                onClick={() => { setApplyingBatchId(block.data.batchId); setLabCodeDraft(''); }}
+                                className="text-xs text-blue-600 hover:text-blue-800 font-semibold inline-flex items-center gap-1 hover:underline"
+                                title="Apply Lab Certificate Verification Code issued by KVIC Admin"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                                Lab Code
+                              </button>
+                            )}
                             <button
-                              onClick={() => onNavigate('consumer', block.data.batchId)}
-                              className="text-xs text-amber-600 hover:text-amber-800 font-semibold inline-flex items-center gap-1 hover:underline"
+                              onClick={() => handleDownloadQR(block.data.batchId)}
+                              className="text-xs text-blue-600 hover:text-blue-800 font-semibold inline-flex items-center gap-1 hover:underline"
+                              title="Generate & Download QR Code"
                             >
-                              Verify <ArrowRight className="w-3 h-3" />
+                              <QrCode className="w-3.5 h-3.5" />
+                              QR
                             </button>
-                          )}
-                          <button
-                            onClick={() => handleDeleteBatch(block.data.batchId)}
-                            className="text-xs text-red-600 hover:text-red-800 font-semibold inline-flex items-center gap-1 hover:underline"
-                            title="Delete batch"
-                          >
-                            Delete <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
+                            {onNavigate && (
+                              <button
+                                onClick={() => onNavigate('consumers', block.data.batchId)}
+                                className="text-xs text-amber-600 hover:text-amber-800 font-semibold inline-flex items-center gap-1 hover:underline"
+                              >
+                                Verify <ArrowRight className="w-3 h-3" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteBatch(block.data.batchId)}
+                              className="text-xs text-red-600 hover:text-red-800 font-semibold inline-flex items-center gap-1 hover:underline"
+                              title="Delete batch"
+                            >
+                              Delete <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
